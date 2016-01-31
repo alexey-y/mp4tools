@@ -19,15 +19,22 @@ import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
+import org.mp4parser.Container;
+import org.mp4parser.muxer.Movie;
+import org.mp4parser.muxer.Track;
+import org.mp4parser.muxer.builder.DefaultMp4Builder;
+import org.mp4parser.muxer.builder.FragmentedMp4Builder;
+import org.mp4parser.muxer.builder.Mp4Builder;
+import org.mp4parser.muxer.container.mp4.MovieCreator;
+import org.mp4parser.muxer.tracks.CencDecryptingTrackImpl;
+import org.mp4parser.muxer.tracks.CencEncryptedTrack;
 import org.mp4parser.tools.Command;
 import org.mp4parser.tools.Hex;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.File;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.io.*;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,12 +46,31 @@ public class DecryptCommand implements Command {
     @Argument(required = true, metaVar = "OUT", index = 1)
     File output;
 
-    @Option(name = "--keys", usage = "Use keyid:key to supply keys for decryption")
+    @Option(name = "--key", usage = "Use keyid:key to supply keys for decryption")
     List<String> hexKeys;
-    Map<UUID, SecretKey> keys;
+    Map<UUID, SecretKey> keys = new HashMap<>();
 
     public int run() {
-        return 0;
+        try {
+            Movie m = MovieCreator.build(input.getAbsolutePath());
+            List<Track> tracks = m.getTracks();
+            List<Track> decryptedTracks = new ArrayList<>();
+            for (Track track : tracks) {
+                if (track instanceof CencEncryptedTrack) {
+                    decryptedTracks.add(new CencDecryptingTrackImpl((CencEncryptedTrack) track, keys));
+                } else {
+                    decryptedTracks.add(track);
+                }
+            }
+            m.setTracks(decryptedTracks);
+            Mp4Builder mp4Builder = new DefaultMp4Builder();
+            Container c = mp4Builder.build(m);
+            c.writeContainer(new FileOutputStream(output).getChannel());
+            return 0;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return 1;
+        }
     }
 
     public void postProcessCmdLineArgs(CmdLineParser cmdLineParser) throws CmdLineException {
